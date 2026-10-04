@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Report a Flood</title>
+    <style>
+        body { font-family: Arial, sans-serif; background: #f0f4f8; margin: 0; padding: 20px; }
+        .box { background: white; padding: 25px; border-radius: 8px; max-width: 450px; margin: 0 auto; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        h2 { color: #0b3d91; margin-top: 0; }
+        label { display: block; margin-top: 12px; font-weight: bold; font-size: 14px; }
+        input, select, textarea { width: 100%; padding: 8px; margin-top: 4px; box-sizing: border-box; }
+        button { margin-top: 18px; width: 100%; padding: 10px; background: #0b3d91; color: white; border: none; border-radius: 4px; cursor: pointer; }
+        .back-link { display: inline-block; margin-bottom: 15px; color: #0b3d91; text-decoration: none; }
+        #locate-btn { margin-top: 6px; background: #2a9d8f; color: white; border: none; padding: 6px 10px; border-radius: 4px; cursor: pointer; font-size: 13px; }
+    </style>
+</head>
+<body>
+    <div class="box">
+        <a class="back-link" href="{% url 'core:home' %}">&larr; Back to map</a>
+        <h2>🚨 Report a Flood</h2>
+        <form method="post" enctype="multipart/form-data">
+            {% csrf_token %}
+
+            <label>Location Name</label>
+            <input type="text" name="location_name" placeholder="e.g. Bulabulin Ward" required>
+
+            <label>GPS Coordinates</label>
+            <input type="text" id="latitude" name="latitude" placeholder="Latitude" required>
+            <input type="text" id="longitude" name="longitude" placeholder="Longitude" required>
+            <button type="button" id="locate-btn" onclick="useMyLocation()">📍 Use My Current Location</button>
+
+            <label>Severity</label>
+            <select name="severity" required>
+                <option value="low">Low</option>
+                <option value="moderate">Moderate</option>
+                <option value="high">High</option>
+                <option value="critical">Critical</option>
+            </select>
+
+            <label>Description</label>
+            <textarea name="description" rows="3" placeholder="Describe what you're seeing..."></textarea>
+
+            <label>Photo (optional)</label>
+            <input type="file" name="photo" accept="image/*">
+
+            <button type="submit">Submit Report</button>
+        </form>
+    </div>
+
+    <script>
+        function useMyLocation() {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(function(position) {
+                    document.getElementById('latitude').value = position.coords.latitude.toFixed(6);
+                    document.getElementById('longitude').value = position.coords.longitude.toFixed(6);
+                }, function() {
+                    alert('Unable to retrieve your location. Please enter coordinates manually.');
+                });
+            } else {
+                alert('Geolocation is not supported by your browser.');
+            }
+        }
+    </script>
+</body>
+</html>

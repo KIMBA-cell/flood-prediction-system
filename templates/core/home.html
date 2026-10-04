@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Maiduguri Flood Prediction & Emergency Response System</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { margin: 0; font-family: Arial, sans-serif; }
+        header {
+            background-color: #0b3d91;
+            color: white;
+            padding: 15px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        header h1 { margin: 0; font-size: 18px; }
+        .header-links a {
+            background-color: #ffffff;
+            color: #0b3d91;
+            padding: 8px 16px;
+            border-radius: 4px;
+            text-decoration: none;
+            font-weight: bold;
+            margin-left: 8px;
+        }
+        #alert-banner {
+            background: #b91c1c;
+            color: white;
+            padding: 10px 20px;
+            font-size: 14px;
+            display: none;
+        }
+        .messages { list-style: none; margin: 0; padding: 0; }
+        .messages li { padding: 10px 20px; font-size: 14px; }
+        .messages .success { background: #d1fae5; color: #065f46; }
+        .messages .warning { background: #fef3c7; color: #92400e; }
+        .messages .info { background: #dbeafe; color: #1e40af; }
+        .messages .error { background: #fee2e2; color: #991b1b; }
+        #map { height: calc(100vh - 60px); width: 100%; }
+        .legend {
+            background: white;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+        .dot {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 6px;
+        }
+
+        /* Pulsing beacon effect for locations with an active alert */
+        .pulse-icon {
+            width: 20px;
+            height: 20px;
+            position: relative;
+        }
+        .pulse-icon::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 20px;
+            height: 20px;
+            margin: -10px 0 0 -10px;
+            border-radius: 50%;
+            background: rgba(185, 28, 28, 0.6);
+            animation: pulse-ring 1.4s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+        }
+        @keyframes pulse-ring {
+            0% { transform: scale(0.5); opacity: 1; }
+            80% { transform: scale(2.5); opacity: 0; }
+            100% { transform: scale(2.5); opacity: 0; }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>🌊 Maiduguri Flood Prediction & Emergency Response System</h1>
+        <div class="header-links">
+            <a href="{% url 'core:dashboard' %}">🧑‍🚒 Dashboard</a>
+            <a href="{% url 'core:predict_flood' %}">📊 Predict</a>
+            <a href="{% url 'core:report_flood' %}">+ Report Flood</a>
+            {% if user.is_superuser %}
+                <a href="{% url 'core:reset_system' %}">♻ Reset</a>
+            {% endif %}
+        </div>
+    </header>
+
+    {% if messages %}
+    <ul class="messages">
+        {% for message in messages %}
+            <li class="{{ message.tags }}">{{ message }}</li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+
+    <div id="alert-banner"></div>
+    <div id="map"></div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        const map = L.map('map').setView([11.8333, 13.1500], 12);
+
+        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
+            attribution: 'Tiles &copy; Esri &mdash; Source: Esri, DeLorme, NAVTEQ, USGS, Intermap, iPC, NRCAN, Esri Japan, METI, Esri China (Hong Kong), Esri (Thailand), TomTom, 2012',
+            maxZoom: 19
+        }).addTo(map);
+
+        function severityColor(severity) {
+            switch (severity) {
+                case 'critical': return '#8B0000';
+                case 'high': return '#e63946';
+                case 'moderate': return '#f4a300';
+                case 'low': return '#2a9d8f';
+                default: return '#6c757d';
+            }
+        }
+
+        let highRiskCount = 0;
+
+        fetch("{% url 'core:locations_data' %}")
+            .then(response => response.json())
+            .then(data => {
+                data.locations.forEach(loc => {
+                    const color = severityColor(loc.latest_severity);
+
+                    // Base coloured marker (as before)
+                    const marker = L.circleMarker([loc.latitude, loc.longitude], {
+                        radius: 10,
+                        fillColor: color,
+                        color: '#333',
+                        weight: 1,
+                        fillOpacity: 0.85
+                    }).addTo(map);
+
+                    marker.bindPopup(`
+                        <strong>${loc.name}</strong><br>
+                        Ward: ${loc.ward || 'N/A'}<br>
+                        Latest severity: ${loc.latest_severity || 'No reports yet'}<br>
+                        Risk level: ${loc.latest_risk || 'Not predicted yet'}
+                        ${loc.has_active_alert ? '<br><strong style="color:#b91c1c;">🚨 Active alert at this location</strong>' : ''}
+                    `);
+
+                    // Pulsing red beacon layered on top, only for locations with an active alert
+                    if (loc.has_active_alert) {
+                        const beaconIcon = L.divIcon({
+                            className: '',
+                            html: '<div class="pulse-icon"></div>',
+                            iconSize: [20, 20],
+                            iconAnchor: [10, 10]
+                        });
+                        L.marker([loc.latitude, loc.longitude], { icon: beaconIcon, interactive: false }).addTo(map);
+                    }
+
+                    if (loc.latest_risk === 'high' || loc.latest_risk === 'severe') {
+                        highRiskCount++;
+                    }
+                });
+
+                if (highRiskCount > 0) {
+                    const banner = document.getElementById('alert-banner');
+                    banner.style.display = 'block';
+                    banner.innerHTML = `🚨 ${highRiskCount} location(s) currently at HIGH or SEVERE flood risk. Check map markers for details.`;
+                }
+            });
+
+        const legend = L.control({ position: 'bottomright' });
+        legend.onAdd = function () {
+            const div = L.DomUtil.create('div', 'legend');
+            div.innerHTML = `
+                <strong>Severity</strong><br>
+                <span class="dot" style="background:#8B0000"></span>Critical<br>
+                <span class="dot" style="background:#e63946"></span>High<br>
+                <span class="dot" style="background:#f4a300"></span>Moderate<br>
+                <span class="dot" style="background:#2a9d8f"></span>Low<br>
+                <span class="dot" style="background:#6c757d"></span>No reports<br>
+                <span class="dot" style="background:#b91c1c;animation:pulse-ring 1.4s infinite;"></span>Active Alert
+            `;
+            return div;
+        };
+        legend.addTo(map);
+    </script>
+</body>
+</html>

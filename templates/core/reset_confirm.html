@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Reset System</title>
+    <style>
+        body { font-family: Arial, sans-serif; background: #f0f4f8; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+        .box { background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); width: 380px; text-align: center; }
+        h2 { color: #b91c1c; margin-top: 0; }
+        p { color: #444; font-size: 14px; }
+        button, .btn { padding: 10px 18px; border: none; border-radius: 4px; cursor: pointer; margin: 6px; text-decoration: none; display: inline-block; }
+        .confirm { background: #b91c1c; color: white; }
+        .cancel { background: #ddd; color: #333; }
+    </style>
+</head>
+<body>
+    <div class="box">
+        <h2>♻ Reset System</h2>
+        <p>This will permanently delete all Locations, Flood Reports, Predictions, Alerts, and Responses. Your user accounts will NOT be affected.</p>
+        <p><strong>This cannot be undone.</strong> Use this only to clear test data before a fresh demo.</p>
+        <form method="post">
+            {% csrf_token %}
+            <button type="submit" class="confirm">Yes, Reset Everything</button>
+            <a href="{% url 'core:home' %}" class="btn cancel">Cancel</a>
+        </form>
+    </div>
+</body>
+</html>
