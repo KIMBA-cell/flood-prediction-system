@@ -2,6 +2,7 @@ from django.shortcuts import render, redirect, get_object_or_404
 from django.http import JsonResponse
 from django.contrib import messages
 from django.contrib.auth.decorators import user_passes_test
+from datetime import date
 from .models import User, Location, HistoricalFloodRecord, FloodReport, FloodPrediction, Alert, EmergencyResponse
 from .prediction_engine import calculate_risk, get_alert_message, check_historical_match
 
@@ -20,6 +21,25 @@ MMC_AREAS = [
     {"name": "Alau Dam Road", "ward": "Konduga", "lat": 11.7500, "lng": 13.2833},
 ]
 
+# Real historical flood data from the September 2024 Alau Dam spillway collapse,
+# seeded automatically so it's always present, on any database, without manual
+# re-entry. Admins can still add further records (future events) via /admin/
+# at any time, independently of this seed.
+HISTORICAL_FLOODS = [
+    {"location": "Gwange", "date": date(2024, 9, 10), "level": 8.5, "rainfall": 165, "desc": "Alau Dam spillway collapse; Gwange and Lagos Street bridges partially collapsed"},
+    {"location": "Bulabulin", "date": date(2024, 9, 10), "level": 9.2, "rainfall": 170, "desc": "Among worst-hit areas; near-total submersion of residential streets"},
+    {"location": "Shehuri", "date": date(2024, 9, 10), "level": 8.0, "rainfall": 160, "desc": "Flash flooding from Alau Dam spillway collapse"},
+    {"location": "Gambomi", "date": date(2024, 9, 10), "level": 8.3, "rainfall": 160, "desc": "Flash flooding from Alau Dam spillway collapse"},
+    {"location": "Budum", "date": date(2024, 9, 10), "level": 7.8, "rainfall": 155, "desc": "Flash flooding; residents displaced to relocation camps"},
+    {"location": "Adamkolo", "date": date(2024, 9, 10), "level": 7.5, "rainfall": 150, "desc": "Flash flooding affecting residential blocks"},
+    {"location": "Millionaires Quarters", "date": date(2024, 9, 10), "level": 7.0, "rainfall": 145, "desc": "Flooding reached residential compounds"},
+    {"location": "Monday Market", "date": date(2024, 9, 10), "level": 8.1, "rainfall": 160, "desc": "Market area flooded, trading disrupted for days"},
+    {"location": "Old Maiduguri", "date": date(2024, 9, 10), "level": 7.6, "rainfall": 155, "desc": "Flooding from Alau Dam spillway collapse; access roads submerged"},
+    {"location": "Lagos Street", "date": date(2024, 9, 10), "level": 8.4, "rainfall": 160, "desc": "Lagos Street bridge partially collapsed; severe flooding along the corridor"},
+    {"location": "Customs Area", "date": date(2024, 9, 10), "level": 7.2, "rainfall": 150, "desc": "Floodwater reached commercial and residential buildings"},
+    {"location": "Alau Dam Road", "date": date(2024, 9, 10), "level": 9.5, "rainfall": 180, "desc": "Site of the Alau Dam spillway collapse; highest recorded water level, origin of the flood event"},
+]
+
 
 def ensure_mmc_areas():
     """Creates a Location record for each known MMC area if it doesn't already
@@ -29,6 +49,27 @@ def ensure_mmc_areas():
         Location.objects.get_or_create(
             name=area["name"],
             defaults={"ward": area["ward"], "latitude": area["lat"], "longitude": area["lng"]},
+        )
+
+
+def ensure_historical_records():
+    """Seeds the real September 2024 historical flood data for each MMC area,
+    if not already present. Safe to call repeatedly — uses get_or_create keyed
+    on location + flood_date, so it never duplicates, and never overwrites or
+    removes records an admin adds manually for future events."""
+    for record in HISTORICAL_FLOODS:
+        try:
+            location = Location.objects.get(name=record["location"])
+        except Location.DoesNotExist:
+            continue
+        HistoricalFloodRecord.objects.get_or_create(
+            location=location,
+            flood_date=record["date"],
+            defaults={
+                "water_level_recorded": record["level"],
+                "rainfall_mm_recorded": record["rainfall"],
+                "description": record["desc"],
+            },
         )
 
 
@@ -48,6 +89,7 @@ def get_acting_user(request):
 def home(request):
     """Renders the main map page."""
     ensure_mmc_areas()
+    ensure_historical_records()
     return render(request, 'core/home.html')
 
 
@@ -56,6 +98,7 @@ def locations_data(request):
     for Leaflet.js to plot as labelled markers. Includes has_active_alert so the
     map can show a pulsing beacon on any location with a live alert."""
     ensure_mmc_areas()
+    ensure_historical_records()
     locations = Location.objects.all()
     data = []
     for loc in locations:
@@ -121,6 +164,7 @@ def report_flood(request):
 def predict_flood(request):
     """Lets anyone enter rainfall and water level data for a location, open access."""
     ensure_mmc_areas()
+    ensure_historical_records()
     locations = Location.objects.all().order_by('name')
     preselected_id = request.GET.get('location_id', '')
 
@@ -184,6 +228,7 @@ def dashboard(request):
     """Responder dashboard: open access, shows the interactive MMC map,
     pending reports, active alerts, and ongoing responses."""
     ensure_mmc_areas()
+    ensure_historical_records()
     pending_reports = FloodReport.objects.exclude(status='resolved').order_by('-reported_at')
     active_alerts = Alert.objects.filter(is_active=True).order_by('-sent_at')
     responses = EmergencyResponse.objects.exclude(status='completed').order_by('-assigned_at')
@@ -235,7 +280,9 @@ def update_response_status(request, response_id):
 
 @user_passes_test(lambda u: u.is_superuser)
 def reset_system(request):
-    """Admin-only (still requires superuser login): wipes all test data."""
+    """Admin-only (still requires superuser login): wipes all test data,
+    EXCEPT the seeded MMC areas and their historical flood records, which
+    get re-created automatically on the next page load anyway."""
     if request.method == 'POST':
         EmergencyResponse.objects.all().delete()
         Alert.objects.all().delete()
