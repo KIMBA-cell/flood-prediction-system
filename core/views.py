@@ -1,8 +1,8 @@
 from django.shortcuts import render, redirect, get_object_or_404
 from django.http import JsonResponse
 from django.contrib import messages
-from django.contrib.auth.decorators import login_required, user_passes_test
-from .models import Location, HistoricalFloodRecord, FloodReport, FloodPrediction, Alert, EmergencyResponse
+from django.contrib.auth.decorators import user_passes_test
+from .models import User, Location, HistoricalFloodRecord, FloodReport, FloodPrediction, Alert, EmergencyResponse
 from .prediction_engine import calculate_risk, get_alert_message, check_historical_match
 
 MMC_AREAS = [
@@ -30,6 +30,19 @@ def ensure_mmc_areas():
             name=area["name"],
             defaults={"ward": area["ward"], "latitude": area["lat"], "longitude": area["lng"]},
         )
+
+
+def get_acting_user(request):
+    """Returns the logged-in user if authenticated, otherwise a shared 'guest'
+    account, so the system can be used freely without requiring login while
+    still satisfying the User foreign keys on reports/responses."""
+    if request.user.is_authenticated:
+        return request.user
+    guest, created = User.objects.get_or_create(
+        username='guest',
+        defaults={'role': 'citizen'}
+    )
+    return guest
 
 
 def home(request):
@@ -63,9 +76,7 @@ def locations_data(request):
 
 
 def location_history(request, location_id):
-    """Returns the historical flood records for a specific location as JSON.
-    Used by the Predict page (and the map) to show past water levels for the
-    selected area before a new prediction is made."""
+    """Returns the historical flood records for a specific location as JSON."""
     location = get_object_or_404(Location, id=location_id)
     records = location.historical_records.order_by('-flood_date')
     data = [{
@@ -77,9 +88,9 @@ def location_history(request, location_id):
     return JsonResponse({'location_name': location.name, 'records': data})
 
 
-@login_required
 def report_flood(request):
-    """Handles the citizen flood-report submission form."""
+    """Handles the citizen flood-report submission form. Open to everyone;
+    uses the logged-in user if available, otherwise a shared guest account."""
     if request.method == 'POST':
         name = request.POST.get('location_name')
         lat = request.POST.get('latitude')
@@ -95,7 +106,7 @@ def report_flood(request):
         )
 
         FloodReport.objects.create(
-            reported_by=request.user,
+            reported_by=get_acting_user(request),
             location=location,
             severity=severity,
             description=description,
@@ -107,12 +118,8 @@ def report_flood(request):
     return render(request, 'core/report_form.html')
 
 
-@login_required
 def predict_flood(request):
-    """Lets a responder/admin enter rainfall and water level data for a location
-    (existing or brand new), calculates risk using the rule-based engine, checks
-    the reading against that location's historical flood records, and
-    auto-creates an Alert if risk is high/severe OR a historical match is found."""
+    """Lets anyone enter rainfall and water level data for a location, open access."""
     ensure_mmc_areas()
     locations = Location.objects.all().order_by('name')
     preselected_id = request.GET.get('location_id', '')
@@ -173,10 +180,9 @@ def predict_flood(request):
     return render(request, 'core/predict_form.html', {'locations': locations, 'preselected_id': preselected_id})
 
 
-@login_required
 def dashboard(request):
-    """Responder/admin dashboard: shows the interactive MMC map immediately,
-    plus pending reports, active alerts, and ongoing responses."""
+    """Responder dashboard: open access, shows the interactive MMC map,
+    pending reports, active alerts, and ongoing responses."""
     ensure_mmc_areas()
     pending_reports = FloodReport.objects.exclude(status='resolved').order_by('-reported_at')
     active_alerts = Alert.objects.filter(is_active=True).order_by('-sent_at')
@@ -190,15 +196,14 @@ def dashboard(request):
     return render(request, 'core/dashboard.html', context)
 
 
-@login_required
 def assign_response(request, report_id):
-    """Assigns the logged-in responder to a flood report."""
+    """Assigns the current user (or guest) to a flood report. Open access."""
     report = get_object_or_404(FloodReport, id=report_id)
 
     if not EmergencyResponse.objects.filter(flood_report=report).exists():
         EmergencyResponse.objects.create(
             flood_report=report,
-            responder=request.user,
+            responder=get_acting_user(request),
             status='assigned'
         )
         report.status = 'verified'
@@ -210,9 +215,8 @@ def assign_response(request, report_id):
     return redirect('core:dashboard')
 
 
-@login_required
 def update_response_status(request, response_id):
-    """Updates the status of an emergency response (assigned -> en_route -> on_site -> completed)."""
+    """Updates the status of an emergency response. Open access."""
     response = get_object_or_404(EmergencyResponse, id=response_id)
 
     if request.method == 'POST':
@@ -229,11 +233,9 @@ def update_response_status(request, response_id):
     return redirect('core:dashboard')
 
 
-@login_required
 @user_passes_test(lambda u: u.is_superuser)
 def reset_system(request):
-    """Admin-only: wipes all test data (reports, predictions, alerts, responses, locations)
-    to reset the system for a fresh demo/testing run. Users are NOT deleted."""
+    """Admin-only (still requires superuser login): wipes all test data."""
     if request.method == 'POST':
         EmergencyResponse.objects.all().delete()
         Alert.objects.all().delete()
